@@ -1,6 +1,7 @@
 {
   "ingestor": {
     "server": "127.0.0.1:9966",
+	"retrySec": 5,
     "heartBeatMs": 15000,
     "packetMaxRecords": 1000,
     "accessKey": "",

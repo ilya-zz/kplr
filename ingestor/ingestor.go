@@ -1,4 +1,6 @@
-package main
+// ingestor package contains a code which helps to build a data ingestor for the
+// aggregator
+package ingestor
 
 import (
 	"context"
@@ -14,32 +16,23 @@ import (
 	"github.com/kplr-io/geyser"
 	"github.com/kplr-io/kplr/model"
 	"github.com/kplr-io/zebra"
+	"github.com/mohae/deepcopy"
 	"github.com/pkg/errors"
 )
 
 type (
-	ingestorConfig struct {
-		Server           string          `json:"server"`
-		HeartBeatMs      int             `json:"heartBeatMs"`
-		PacketMaxRecords int             `json:"packetMaxRecords"`
-		AccessKey        string          `json:"accessKey"`
-		SecretKey        string          `json:"secretKey"`
-		Schemas          []*schemaConfig `json:"schemas"`
-	}
-
-	schemaConfig struct {
-		PathMatcher string            `json:"pathMatcher"`
-		SourceId    string            `json:"sourceId"`
-		Tags        map[string]string `json:"tags"`
-	}
-
+	// schema struct contains a schema descriptor, which includes the SchemaConfig
+	// and corresponding reg-exp matcher, which is going to be used for matching
+	// the schema. This structure is used internally for identifying the schema.
 	schema struct {
-		cfg     *schemaConfig
+		cfg     *SchemaConfig
 		matcher *regexp.Regexp
 	}
 
-	ingestor struct {
-		cfg        *ingestorConfig
+	// Ingestor struct is used for sending data received from geyser to an log
+	// aggregator.
+	Ingestor struct {
+		cfg        *IngestorConfig
 		zClient    zebra.Writer
 		pktEncoder *encoder
 		schemas    []*schema
@@ -51,6 +44,8 @@ type (
 		hdrsCache *container.Lru
 	}
 
+	// hdrsCacheRec struct is used by Ingestor to cache association between file
+	// name and the message data header.
 	hdrsCacheRec struct {
 		srcId string
 		tags  model.TagLine
@@ -61,9 +56,7 @@ func (hcr *hdrsCacheRec) String() string {
 	return fmt.Sprint("{srcId=", hcr.srcId, ", tags=", hcr.tags, "}")
 }
 
-//=== ingestor
-
-func newIngestor(cfg *ingestorConfig, ctx context.Context) (*ingestor, error) {
+func NewIngestor(cfg *IngestorConfig, ctx context.Context) (*Ingestor, error) {
 	if err := checkConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -71,9 +64,9 @@ func newIngestor(cfg *ingestorConfig, ctx context.Context) (*ingestor, error) {
 	logger := log4g.GetLogger("kplr.ingestor")
 	logger.Info("Creating, config=", geyser.ToJsonStr(cfg))
 
-	ing := new(ingestor)
+	ing := new(Ingestor)
 	ing.hdrsCache = container.NewLru(10000, 5*time.Minute, nil)
-	ing.cfg = cfg
+	ing.cfg = deepcopy.Copy(cfg).(*IngestorConfig)
 	ing.pktEncoder = newEncoder()
 	ing.logger = logger
 	ing.ctx = ctx
@@ -87,35 +80,64 @@ func newIngestor(cfg *ingestorConfig, ctx context.Context) (*ingestor, error) {
 	return ing, nil
 }
 
-func (i *ingestor) connect() error {
+func (i *Ingestor) Run(ctx context.Context, events <-chan *geyser.Event) chan bool {
+	i.connect()
+	done := make(chan bool)
+	go func() {
+		defer close(done)
+		for ctx.Err() == nil {
+			select {
+			case <-ctx.Done():
+				return
+			case ev := <-events:
+				var err error
+				for ctx.Err() == nil {
+					if err == nil {
+						err = i.ingest(ev)
+						if err == nil {
+							ev.Confirm()
+							break
+						}
+					}
+					i.logger.Info("Ingestor error, recovering; cause: ", err)
+					err = i.connect()
+				}
+			}
+		}
+	}()
+	return done
+}
+
+func (i *Ingestor) connect() error {
 	i.logger.Info("Connecting to ", i.cfg.Server)
 	var (
 		zcl zebra.Writer
 		err error
 	)
 
-	retry := 5 * time.Second
+	retry := time.Duration(i.cfg.RetrySec) * time.Second
 	for {
 		zcl, err = zebra.NewClient(i.cfg.Server,
 			&zebra.ClientConfig{HeartBeatMs: i.cfg.HeartBeatMs, AccessKey: i.cfg.AccessKey, SecretKey: i.cfg.SecretKey})
 		if err == nil {
 			break
 		}
-		logger.Warn("Could not connect to the server, err=", err, " will try in ", retry)
+		i.logger.Warn("Could not connect to the server, err=", err, " will try in ", retry)
 
 		select {
 		case <-i.ctx.Done():
 			return fmt.Errorf("Interrupted")
 		case <-time.After(retry):
 		}
-		logger.Warn("after 5 sec")
+		i.logger.Warn("after 5 sec")
 	}
+
 	i.zClient = zcl
 	i.logger.Info("connected")
 	return nil
 }
 
-func (i *ingestor) ingest(ev *geyser.Event) error {
+func (i *Ingestor) ingest(ev *geyser.Event) error {
 	if i.zClient == nil {
 		return fmt.Errorf("Not initialized")
 	}
@@ -143,7 +165,7 @@ func (i *ingestor) ingest(ev *geyser.Event) error {
 
 // getHeaderByFilename get filename and forms header using schema and configuration
 // it can cache already calculated headers, so will work quickly this case
-func (i *ingestor) getHeaderByFilename(filename string) (*hdrsCacheRec, error) {
+func (i *Ingestor) getHeaderByFilename(filename string) (*hdrsCacheRec, error) {
 	i.lock.Lock()
 	defer i.lock.Unlock()
 
@@ -176,14 +198,14 @@ func (i *ingestor) getHeaderByFilename(filename string) (*hdrsCacheRec, error) {
 	return hdr, nil
 }
 
-func (i *ingestor) getKnownTags() map[interface{}]interface{} {
+func (i *Ingestor) getKnownTags() map[interface{}]interface{} {
 	i.lock.Lock()
 	res := i.hdrsCache.GetData()
 	i.lock.Unlock()
 	return res
 }
 
-func (i *ingestor) getSchema(filename string) *schema {
+func (i *Ingestor) getSchema(filename string) *schema {
 	for _, s := range i.schemas {
 		if s.matcher.MatchString(filename) {
 			return s
@@ -192,7 +214,7 @@ func (i *ingestor) getSchema(filename string) *schema {
 	return nil
 }
 
-func (i *ingestor) close() {
+func (i *Ingestor) close() {
 	i.logger.Info("Closing...")
 	if i.zClient != nil {
 		i.zClient.Close()
@@ -202,13 +224,13 @@ func (i *ingestor) close() {
 
 //=== schemaConfig
 
-func (s *schemaConfig) String() string {
+func (s *SchemaConfig) String() string {
 	return geyser.ToJsonStr(s)
 }
 
 //=== schema
 
-func newSchema(cfg *schemaConfig) *schema {
+func newSchema(cfg *SchemaConfig) *schema {
 	return &schema{
 		cfg:     cfg,
 		matcher: regexp.MustCompile(cfg.PathMatcher),
@@ -250,22 +272,31 @@ func (s *schema) String() string {
 
 //=== helpers
 
-func checkConfig(cfg *ingestorConfig) error {
+func checkConfig(cfg *IngestorConfig) error {
 	if cfg == nil {
 		return fmt.Errorf("invalid config=%v", cfg)
 	}
+
+	if cfg.RetrySec < 1 {
+		return fmt.Errorf("invalid config; retry Zebra onnect timeout=%s, expecting 1 second or more", cfg.RetrySec)
+	}
+
 	if strings.TrimSpace(cfg.Server) == "" {
 		return fmt.Errorf("invalid config; server=%v, must be non-empty", cfg.Server)
 	}
+
 	if cfg.HeartBeatMs < 100 {
 		return fmt.Errorf("invalid config; heartBeatMs=%v, must be >= 100ms", cfg.HeartBeatMs)
 	}
+
 	if cfg.PacketMaxRecords <= 0 {
 		return fmt.Errorf("invalid config; packetMaxRecords=%v, must be > 0", cfg.PacketMaxRecords)
 	}
+
 	if len(cfg.Schemas) == 0 {
 		return errors.New("invalid config; at least 1 schema must be defined")
 	}
+
 	for _, s := range cfg.Schemas {
 		if err := checkSchema(s); err != nil {
 			return fmt.Errorf("invalid config; invalid schema=%v, %v", s, err)
@@ -274,7 +305,7 @@ func checkConfig(cfg *ingestorConfig) error {
 	return nil
 }
 
-func checkSchema(s *schemaConfig) error {
+func checkSchema(s *SchemaConfig) error {
 	if strings.TrimSpace(s.PathMatcher) == "" {
 		return errors.New("patchMatcher must be non-empty")
 	}
