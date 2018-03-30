@@ -17,7 +17,6 @@
   "collector": {
     "scanPaths": ["/var/log/*.log", "/var/log/*/*.log"],
     "scanPathsIntervalSec": 60,
-    "stateFile": "/tmp/collector.state",
     "stateFlushIntervalSec": 10,
     "eventMaxRecords": 1000,
     "eventSendIntervalMs": 200,
@@ -26,5 +25,7 @@
       "pathMatcher": ".*",
       "timeFormats": ["DD/MMM/YYYY:HH:mm:ss ZZZZ"]
     }]
-  }
+  },
+  "statusFile": "/opt/kplr/agent/status",
+  "stateFile": "/opt/kplr/agent/state.json"
 }

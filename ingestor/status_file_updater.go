@@ -93,7 +93,7 @@ func (sfu *StatusFileUpdater) saveStatFile() {
 	gs := sfu.gsr.GetStats()
 	fmt.Fprintf(tw, "\tscan paths:\t%v\n", gs.Config.ScanPaths)
 	fmt.Fprintf(tw, "\tscan intervals:\tevery %d sec.\n", gs.Config.ScanPathsIntervalSec)
-	fmt.Fprintf(tw, "\tstate file:\t%s\n", gs.Config.StateFile)
+	fmt.Fprintf(tw, "\tstate file:\t%s\n", sfu.cfg.GeyserStateFile)
 	fmt.Fprintf(tw, "\tstate update:\tevery %d sec.\n", gs.Config.StateFlushIntervalSec)
 	fmt.Fprintf(tw, "\tfile formats:\t%v\n", gs.Config.FileFormats)
 	fmt.Fprintf(tw, "\trecord max size:\t%s\n", kplr.FormatSize(int64(gs.Config.RecordMaxSizeBytes)))
@@ -101,6 +101,11 @@ func (sfu *StatusFileUpdater) saveStatFile() {
 	fmt.Fprintf(tw, "--- scanned files (%d) ---\n", len(gs.Workers))
 	for _, wkr := range gs.Workers {
 		fmt.Fprintf(tw, "\t%s\n", wkr.Filename)
+	}
+
+	fmt.Fprintf(tw, "\n--- excluded files (%d) ---\n", len(gs.Excludes))
+	for _, ef := range gs.Excludes {
+		fmt.Fprintf(tw, "\t%s\n", ef)
 	}
 
 	knwnTags := sfu.ing.getKnownTags()

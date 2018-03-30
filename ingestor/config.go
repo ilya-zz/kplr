@@ -36,11 +36,16 @@ type (
 		Ingestor   *IngestorConfig `json:"ingestor"`
 		Collector  *geyser.Config  `json:"collector"`
 		StatusFile string          `json:"statusFile"`
+
+		// GeyserStateFile contains a path to file where geyser will keep its
+		// scan status.
+		GeyserStateFile string `json:"stateFile"`
 	}
 )
 
 const (
-	cDefaultConfigStatus = "/tmp/kplr-agent.status"
+	cDefaultConfigStatus    = "/tmp/kplr/agent/status"
+	cDefaultGeyserStateFile = "/opt/kplr/agent/collector.state"
 )
 
 func NewDefaultIngestorConfig() *IngestorConfig {
@@ -101,7 +106,12 @@ func (ic *IngestorConfig) Apply(ic1 *IngestorConfig) {
 }
 
 func NewDefaultAgentConfig() *AgentConfig {
-	return &AgentConfig{NewDefaultIngestorConfig(), geyser.NewDefaultConfig(), cDefaultConfigStatus}
+	return &AgentConfig{
+		Ingestor:        NewDefaultIngestorConfig(),
+		Collector:       geyser.NewDefaultConfig(),
+		StatusFile:      cDefaultConfigStatus,
+		GeyserStateFile: cDefaultGeyserStateFile,
+	}
 }
 
 // LoadFromFile loads the config from file name provided in path
@@ -124,5 +134,8 @@ func (ac *AgentConfig) Apply(ac1 *AgentConfig) {
 	ac.Collector.Apply(ac1.Collector)
 	if ac1.StatusFile != "" {
 		ac.StatusFile = ac1.StatusFile
+	}
+	if ac1.GeyserStateFile != "" {
+		ac.GeyserStateFile = ac1.GeyserStateFile
 	}
 }

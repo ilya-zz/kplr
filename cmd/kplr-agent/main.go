@@ -22,7 +22,7 @@ type (
 
 const (
 	Version            = "0.0.1"
-	cDefaultConfigPath = "/opt/kplr/config.json"
+	cDefaultConfigPath = "/opt/kplr/agent/config.json"
 )
 
 var (
@@ -65,7 +65,7 @@ func main() {
 		ing *ingestor.Ingestor
 	)
 
-	gsr, err = newCollector(cfg.Collector)
+	gsr, err = newCollector(cfg)
 	if err != nil {
 		logger.Fatal("Unable to create collector; cause: ", err)
 		return
@@ -101,8 +101,8 @@ func parseCLP() *args {
 	return res
 }
 
-func newCollector(cfg *geyser.Config) (*geyser.Collector, error) {
-	gsr, err := geyser.NewCollector(cfg)
+func newCollector(cfg *ingestor.AgentConfig) (*geyser.Collector, error) {
+	gsr, err := geyser.NewCollector(cfg.Collector, geyser.NewFileStatusStorage(cfg.GeyserStateFile))
 	if err == nil {
 		err = gsr.Start()
 	}
