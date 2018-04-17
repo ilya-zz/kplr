@@ -4,14 +4,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/jrivets/gorivets"
 	"github.com/jrivets/log4g"
-)
-
-type (
-	ISO8601Time time.Time
 )
 
 var (
@@ -19,12 +14,6 @@ var (
 
 	ErrNotFound = fmt.Errorf("not found")
 )
-
-func (t ISO8601Time) MarshalJSON() ([]byte, error) {
-	tm := time.Time(t)
-	stamp := fmt.Sprintf("\"%s\"", tm.Format("2006-01-02T15:04:05-0700"))
-	return []byte(stamp), nil
-}
 
 func Assert(cond bool, errMsg string) {
 	if !cond {

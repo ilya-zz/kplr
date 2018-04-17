@@ -15,11 +15,18 @@ import (
 )
 
 type (
+	// CursorItFunc is a function which is used by the Cursor iterator to
+	// notify the invoker by found events.
+	CursorItFunc func(le *model.LogEvent) bool
+
 	Cursor interface {
 		io.Closer
 
 		Id() string
 
+		// TODO: replace GetReader onto Iterate. Reader will contain logic over
+		// the iterator
+		//
 		// GetReader returns cursor read which reads up to limit number of records.
 		// The exact param specifies the reader behavior when it reaches end of
 		// the data, before it has read limit. If exact == true, then the reader
@@ -42,6 +49,21 @@ type (
 		// it will skip records by the direction, if it is negative then it
 		// will skip recs records in opposite direction
 		Offset(recs int64)
+
+		// Iterate walks through log events and notify invoker by calling cif
+		// for every log event found. The function analyzes cif result and
+		// continue, if it is positive, or stop the iteration if the cif returs false.
+		//
+		// The event iterator reaches EOF, it invokes cif with nil value for the
+		// log event. If cif(nil) returns true, it means that the iterator should
+		// wait for new records.
+		//
+		// Iterate receives context and it will stop processing when if finds
+		// the context is closed.
+		//
+		// The function returns error if it is not io.EOF and further processing
+		// is not possible.
+		Iterate(ctx context.Context, cif CursorItFunc) error
 
 		SetPosition(pos CursorPosition)
 		GetPosition() CursorPosition
@@ -296,6 +318,33 @@ func (c *cur) Close() error {
 	return err
 }
 
+func (c *cur) Iterate(ctx context.Context, cif CursorItFunc) (err error) {
+	defer c.onReaderClosed()
+
+	for ctx.Err() == nil {
+		err = c.it.Get(&c.le)
+		if err == nil {
+			c.it.Next()
+			if !cif(&c.le) {
+				return nil
+			}
+			continue
+		}
+
+		if err == io.EOF {
+			if !cif(nil) {
+				return nil
+			}
+			c.waitRecords(ctx)
+			continue
+		}
+
+		// an unrecoverable error
+		return err
+	}
+	return ctx.Err()
+}
+
 // =============================== recsReader ================================
 
 // nextRecord reads current log event, format it, if it was read successfully and
@@ -328,7 +377,9 @@ func (c *cur) waitRecords(ctx context.Context) {
 	<-ctx2.Done()
 }
 
-// onReaderClosed releases all JReaders for iterators
+// onReaderClosed releases all JReaders for iterators. This method suggested
+// to be called every time when read operation is over or it is paused for a
+// reason. By calling the method underlying readers are freed.
 func (c *cur) onReaderClosed() {
 	for _, it := range c.its {
 		it.JReader.Close()

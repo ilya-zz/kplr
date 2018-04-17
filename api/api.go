@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jrivets/log4g"
+	"github.com/kplr-io/api/model"
 	"github.com/kplr-io/container"
 	"github.com/kplr-io/kplr"
 	"github.com/kplr-io/kplr/cursor"
@@ -56,7 +58,7 @@ type (
 		ctxCancel context.CancelFunc
 	}
 
-	api_error struct {
+	apiError struct {
 		err_tp int
 		msg    string
 	}
@@ -67,7 +69,7 @@ type (
 	}
 
 	// cur_desc a structure which contains information about persisted cursors
-	cur_desc struct {
+	curDesc struct {
 		cur cursor.Cursor
 
 		createdAt   time.Time
@@ -86,14 +88,14 @@ const (
 )
 
 func NewError(tp int, msg string) error {
-	return &api_error{tp, msg}
+	return &apiError{tp, msg}
 }
 
-func (ae *api_error) Error() string {
+func (ae *apiError) Error() string {
 	return ae.msg
 }
 
-func (ae *api_error) get_error_resp() error_resp {
+func (ae *apiError) get_error_resp() error_resp {
 	switch ae.err_tp {
 	case ERR_INVALID_CNT_TYPE:
 		return error_resp{http.StatusBadRequest, ae.msg}
@@ -255,23 +257,20 @@ func (ra *RestApi) h_POST_cursors(c *gin.Context) {
 		return
 	}
 
-	cur, qry, err := ra.newCursorByQuery(kqlTxt)
+	cur, _, err := ra.newCursorByQuery(kqlTxt)
 	if ra.errorResponse(c, wrapErrorInvalidParam(err)) {
 		return
 	}
 	cd := ra.newCurDesc(cur)
 	cd.setKQL(kqlTxt)
 
-	ra.logger.Info("New cursor desc ", cd)
+	ra.logger.Info("New cursor desc curId=", curId, " ", cd)
 
 	w := c.Writer
 	uri := composeURI(c.Request, curId)
 	w.Header().Set("Location", uri)
-	c.Status(http.StatusCreated)
-
-	rdr := cur.GetReader(qry.Limit(), false)
-	ra.sendData(c, rdr, false)
 	ra.putCursorDesc(curId, cd)
+	c.JSON(http.StatusCreated, toCurDescDO(cd, curId))
 }
 
 // GET /cursors/:curId
@@ -299,35 +298,31 @@ func (ra *RestApi) h_GET_cursors_curId_logs(c *gin.Context) {
 	}
 
 	defer ra.putCursorDesc(curId, cd)
+	defer ra.logger.Info("Hello!")
 
 	q := c.Request.URL.Query()
-	kqlTxt, err := ra.parseRequest(c, q, "")
-	if ra.errorResponse(c, wrapErrorInvalidParam(err)) {
-		ra.logger.Warn("GET /cursors/", curId, "/logs invalid reqeust err=", err)
+
+	limit := parseInt64(q, "limit", 1000)
+	if limit < 1 || limit > 100000 {
+		ra.errorResponse(c, NewError(ERR_INVALID_PARAM, fmt.Sprintf("Wrong limit value %d, expecting an integer in between 1..100000", limit)))
 		return
 	}
 
-	qry, err := ra.applyQueryToCursor(kqlTxt, cd.cur)
+	offset := parseInt64(q, "offset", 0)
+	blocked := parseBoolean(q, "blocked", false)
+	pos := parseString(q, "position", "")
+
+	err := ra.applyParamsToCursor(cd.cur, offset, pos)
 	if ra.errorResponse(c, err) {
 		return
 	}
-	cd.setKQL(kqlTxt)
 
-	rdr := cd.cur.GetReader(qry.Limit(), false)
-	ra.sendData(c, rdr, false)
+	ra.sendLogEvents(c, cd.cur, limit, blocked)
 }
 
 // GET /journals
 func (ra *RestApi) h_GET_journals(c *gin.Context) {
-	jrnls := ra.JrnlCtrlr.GetJournals()
-
-	var page PageDo
-	page.Data = jrnls
-	page.Count = len(jrnls)
-	page.Total = len(jrnls)
-	page.Offset = 0
-
-	c.JSON(http.StatusOK, &page)
+	c.JSON(http.StatusOK, ra.JrnlCtrlr.GetJournals())
 }
 
 // GET /journals/:jId
@@ -340,15 +335,15 @@ func (ra *RestApi) h_GET_journals_jId(c *gin.Context) {
 	c.JSON(http.StatusOK, ji)
 }
 
-func (ra *RestApi) newCurDesc(cur cursor.Cursor) *cur_desc {
-	cd := new(cur_desc)
+func (ra *RestApi) newCurDesc(cur cursor.Cursor) *curDesc {
+	cd := new(curDesc)
 	cd.createdAt = time.Now()
 	cd.cur = cur
 	cd.lastTouched = cd.createdAt
 	return cd
 }
 
-func (ra *RestApi) getCursorDesc(curId string) *cur_desc {
+func (ra *RestApi) getCursorDesc(curId string) *curDesc {
 	ra.lock.Lock()
 	defer ra.lock.Unlock()
 
@@ -356,13 +351,13 @@ func (ra *RestApi) getCursorDesc(curId string) *cur_desc {
 	if val == nil {
 		return nil
 	}
-	cd := val.Val().(*cur_desc)
+	cd := val.Val().(*curDesc)
 	ra.cursors.DeleteNoCallback(curId)
 	cd.lastTouched = time.Now()
 	return cd
 }
 
-func (ra *RestApi) putCursorDesc(curId string, cd *cur_desc) {
+func (ra *RestApi) putCursorDesc(curId string, cd *curDesc) {
 	ra.lock.Lock()
 	ra.cursors.Put(curId, cd, 1)
 	ra.lock.Unlock()
@@ -370,97 +365,115 @@ func (ra *RestApi) putCursorDesc(curId string, cd *cur_desc) {
 
 func (ra *RestApi) onCursorDeleted(k, v interface{}) {
 	ra.logger.Info("Cursor ", k, " is deleted")
-	cd := v.(*cur_desc)
+	cd := v.(*curDesc)
 	cd.cur.Close()
 }
 
-// parseRequest parses HTTP request. It expects query specified by url-encoded
-// or via body string. For query the following params are supported:
-// where - optional. Allows to specify complex where conditions
-// limit - optional, default -1. Allows to specify limit
-// offset - optional, how many records must be skipped. Depends on request
-// position - optional, specifies position where the cursor should start from.
-//     allowed values head, tail and base64 encoded position, if known.
-//
-// Body can be specified too. If provided the body context is returned, all
-// other params are ignored
-func (ra *RestApi) parseRequest(c *gin.Context, q url.Values, defPos string) (string, error) {
-	var qbuf bytes.Buffer
-	bdy := c.Request.Body
-	if bdy != nil {
-		n, err := qbuf.ReadFrom(bdy)
-		if n > 0 {
-			return qbuf.String(), err
-		}
-	}
-
-	offset := int64(0)
-	limit := int64(-1)
-	addCond := false
-	where := false
-	position := defPos
-
-	ra.logger.Debug("request params ", q)
+// applyQueryParamsToKql receives query params in q and apply them to kql object.
+// It is supposed that some part of query could be specified as query params.
+// The following parameters can be specified:
+// format - defines FORMAT part of KQL
+// from - defines FROM part of KQL
+// where - defines WHERE part of KQL
+// position - defines POSITION part of KQL
+// offset - defines OFFSET an integer value of KQL
+// limit -  defines LIMIT an integer value of KQL
+// blocked - skipped as not relevant for the KQL
+// "other param" - any other value will be added to WHERE condition with AND
+// 		concatenation
+func applyQueryParamsToKql(q url.Values, kql *model.Kql) (err error) {
+	var wb bytes.Buffer
+	var iv int64
 	for k, v := range q {
 		if len(v) < 1 {
 			continue
 		}
 
-		var err error
-
 		switch strings.ToLower(k) {
-		case "limit":
-			limit, err = strconv.ParseInt(v[0], 10, 64)
-			if err != nil {
-				return "", NewError(ERR_INVALID_PARAM, fmt.Sprint("'limit' must be an integer (negative value means no limit), but got ", v[0]))
+		case "format":
+			kql.Format = model.GetStringPtr(v[0])
+		case "from":
+			if kql.From == nil {
+				kql.From = make([]string, 0, len(v))
 			}
-		case "offset":
-			offset, err = strconv.ParseInt(v[0], 10, 64)
-			if err != nil {
-				return "", NewError(ERR_INVALID_PARAM, fmt.Sprint("'offset' must be an integer, but got ", v[0]))
-			}
+			kql.From = append(kql.From, v...)
 		case "where":
-			qbuf.Reset()
-			qbuf.WriteString("SELECT WHERE ")
-			qbuf.WriteString(v[0])
-			where = true
+			if wb.Len() > 0 {
+				wb.WriteString(" AND ")
+			}
+			wb.WriteString(v[0])
+		case "position":
+			kql.Position = model.GetStringPtr(v[0])
+		case "offset":
+			iv, err = strconv.ParseInt(v[0], 10, 64)
+			if err != nil {
+				return NewError(ERR_INVALID_PARAM, fmt.Sprint("'offset' must be an integer, but got ", v[0]))
+			}
+			kql.Offset = model.GetInt64Ptr(iv)
+		case "limit":
+			iv, err = strconv.ParseInt(v[0], 10, 64)
+			if err != nil {
+				return NewError(ERR_INVALID_PARAM, fmt.Sprint("'limit' must be an integer (negative value means no limit), but got ", v[0]))
+			}
+			kql.Limit = model.GetInt64Ptr(iv)
 		case "blocked":
 			// ignore blocked
 			continue
-		case "position":
-			position = v[0]
 		default:
-			if where {
-				break
+			if wb.Len() > 0 {
+				wb.WriteString(" AND ")
 			}
-			if addCond {
-				qbuf.WriteString(" AND ")
-			} else {
-				qbuf.WriteString("SELECT WHERE ")
-			}
-			addCond = true
-			qbuf.WriteString(k)
-			qbuf.WriteString("=")
-			qbuf.WriteString(v[0])
+			wb.WriteString(k)
+			wb.WriteRune('=')
+			wb.WriteString(v[0])
 		}
 	}
+	kql.Where = model.GetStringPtr(wb.String())
+	return nil
+}
 
-	if !addCond && !where {
-		qbuf.WriteString("SELECT ")
+// parseRequest parses HTTP request. It expects query specified by url-encoded
+// or via body of the request. It will try to parse the body, which's expected to be a
+// JSON encoded model.Kql object, or a pure KQL text, first. In case of pure
+// KQL is provided in the body, its params cannot be overwritten by the query
+// params, so a error will be reported, if this happens. JSON model.Kql object's
+// fields can be overwritten by the query params.
+//
+// the function returns KQL query or an error if any
+func (ra *RestApi) parseRequest(c *gin.Context, q url.Values, defPos string) (string, error) {
+	var kq model.Kql
+	err := applyQueryParamsToKql(q, &kq)
+	if err != nil {
+		return "", err
+	}
+	if defPos != "" && kq.Position == nil {
+		kq.Position = model.GetStringPtr(defPos)
 	}
 
-	// just to make it parses properly
-	if position != "" {
-		qbuf.WriteString(" POSITION '")
-		qbuf.WriteString(position)
-		qbuf.WriteString("'")
-	}
-	qbuf.WriteString(" OFFSET ")
-	qbuf.WriteString(strconv.FormatInt(offset, 10))
-	qbuf.WriteString(" LIMIT ")
-	qbuf.WriteString(strconv.FormatInt(limit, 10))
+	var qbuf bytes.Buffer
+	bdy := c.Request.Body
+	if bdy != nil {
+		n, _ := qbuf.ReadFrom(bdy)
+		if n > 0 {
+			if c.ContentType() == "application/json" {
+				var kdao model.Kql
+				err := json.Unmarshal(qbuf.Bytes(), &kdao)
+				if err != nil {
+					return "", NewError(ERR_INVALID_PARAM, fmt.Sprint("Could not unmarshal json dictated by content-type application/json:", err))
+				}
+				kdao.Apply(&kq)
+				return kdao.FormatKql(), nil
+			}
 
-	return qbuf.String(), nil
+			if !kq.IsEmpty() {
+				return "", NewError(ERR_INVALID_PARAM, fmt.Sprint("Invalid request - received pure KQL text in the body together with query params ",
+					q, ". Only pure KQL text with query params is not allowed. You can provide the query in JSON format or query params only"))
+			}
+
+			return qbuf.String(), nil
+		}
+	}
+	return kq.FormatKql(), nil
 }
 
 func (ra *RestApi) newCursorByQuery(kqlTxt string) (cursor.Cursor, *kql.Query, error) {
@@ -488,7 +501,7 @@ func (ra *RestApi) newCursorByQuery(kqlTxt string) (cursor.Cursor, *kql.Query, e
 		return cur, qry, err
 	}
 
-	// qry.Position() never returns ""...
+	// qry.Position() never returns ""
 	posDO := qry.Position()
 	pos, err := curPosDOToCurPos(posDO)
 	if err != nil {
@@ -510,35 +523,26 @@ func (ra *RestApi) newCursorByQuery(kqlTxt string) (cursor.Cursor, *kql.Query, e
 	return cur, qry, nil
 }
 
-func (ra *RestApi) applyQueryToCursor(kqlTxt string, cur cursor.Cursor) (*kql.Query, error) {
-	qry, err := kql.Compile(kqlTxt, ra.TIndx)
-	if err != nil {
-		return nil, NewError(ERR_INVALID_PARAM, fmt.Sprint("Parsing error of automatically generated query='", kqlTxt, "', check the query syntax (escape params needed?), parser says: ", err))
-	}
-
-	cur.SetFilter(qry.GetFilterF())
-	offs := qry.Offset()
-	if qry.QSel.Position != nil {
-		posDO := qry.Position()
-		pos, err := curPosDOToCurPos(posDO)
+func (ra *RestApi) applyParamsToCursor(cur cursor.Cursor, offset int64, pos string) error {
+	if len(pos) > 0 {
+		ps, err := curPosDOToCurPos(pos)
 		if err != nil {
-			return nil, NewError(ERR_INVALID_PARAM, fmt.Sprint("Could not recognize position=", qry.Position(), " the error=", err))
+			return NewError(ERR_INVALID_PARAM, fmt.Sprint("Could not recognize position=", pos, " the error=", err))
 		}
 
-		if posDO == "tail" {
+		if pos == "tail" {
 			skip := int64(1)
-			if offs > 0 {
-				skip = qry.Offset()
+			if offset > 0 {
+				skip = offset
 			}
 			cur.SkipFromTail(skip)
-			offs = 0
+			offset = 0
 		} else {
-			cur.SetPosition(pos)
+			cur.SetPosition(ps)
 		}
 	}
-	cur.Offset(offs)
-
-	return qry, nil
+	cur.Offset(offset)
+	return nil
 }
 
 // sendData copies data from the reader to the context writer. If blocked is
@@ -582,13 +586,49 @@ func (ra *RestApi) sendData(c *gin.Context, rdr io.ReadCloser, blocked bool) {
 	ra.logger.Debug("sendData(): over id=", id)
 }
 
+func (ra *RestApi) sendLogEvents(c *gin.Context, cur cursor.Cursor, limit int64, blocked bool) {
+	w := c.Writer
+	id := atomic.AddInt32(&ra.rdsCnt, 1)
+
+	ra.logger.Debug("sendLogEvents(): id=", id, ", limit=", limit, ", blocked=", blocked)
+	ctx := ra.MCtx
+
+	if blocked {
+		notify := w.CloseNotify()
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+
+		go func() {
+		L1:
+			for {
+				select {
+				case <-notify:
+					ra.logger.Debug("sendLogEvents(): <-notify, id=", id)
+					break L1
+				case <-ctx.Done():
+					ra.logger.Debug("sendLogEvents(): <-ctx.Done(), id=", id)
+					break L1
+				}
+			}
+			cancel()
+		}()
+	}
+
+	ler := newLogEventReader(ctx, cur, int(limit), blocked)
+	evs, err := ler.readEvents()
+	if ra.errorResponse(c, err) {
+		return
+	}
+	c.JSON(http.StatusOK, &model.LogEventsResponse{LogEvents: evs, NextPos: curPosToCurPosDO(cur.GetPosition())})
+}
+
 // =============================== cur_desc ==================================
-func (cd *cur_desc) setKQL(kql string) {
+func (cd *curDesc) setKQL(kql string) {
 	cd.lastKQL = kql
 	cd.lastTouched = time.Now()
 }
 
-func (cd *cur_desc) String() string {
+func (cd *curDesc) String() string {
 	return fmt.Sprint("{curId=", cd.cur.Id(), ", created=", cd.createdAt, ", lastTouched=", cd.lastTouched,
 		", lastKql='", cd.lastKQL, "'}")
 }
@@ -606,6 +646,28 @@ func parseBoolean(q url.Values, paramName string, defVal bool) bool {
 	}
 
 	return res
+}
+
+func parseInt64(q url.Values, paramName string, defVal int64) int64 {
+	val, ok := q[paramName]
+	if !ok || len(val) < 1 {
+		return defVal
+	}
+
+	res, err := strconv.ParseInt(val[0], 10, 64)
+	if err != nil {
+		return defVal
+	}
+
+	return res
+}
+
+func parseString(q url.Values, paramName string, defVal string) string {
+	val, ok := q[paramName]
+	if !ok || len(val) < 1 {
+		return defVal
+	}
+	return val[0]
 }
 
 func bindAppJson(c *gin.Context, inf interface{}) error {
@@ -628,7 +690,7 @@ func (ra *RestApi) errorResponse(c *gin.Context, err error) bool {
 		return false
 	}
 
-	ae, ok := err.(*api_error)
+	ae, ok := err.(*apiError)
 	if ok {
 		er := ae.get_error_resp()
 		c.JSON(er.Status, &er)

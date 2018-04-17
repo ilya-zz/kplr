@@ -37,7 +37,7 @@ type (
 		Where    *Expression `["WHERE" @@]`
 		Position *Position   `["POSITION" @@]`
 		Offset   *int64      `["OFFSET" @Ident]`
-		Limit    int64       `"LIMIT" @Ident`
+		Limit    int64       `["LIMIT" @Ident]`
 	}
 
 	NamesList struct {
