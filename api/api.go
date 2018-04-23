@@ -599,18 +599,15 @@ func (ra *RestApi) sendLogEvents(c *gin.Context, cur cursor.Cursor, limit int64,
 		ctx, cancel = context.WithCancel(ctx)
 
 		go func() {
-		L1:
-			for {
-				select {
-				case <-notify:
-					ra.logger.Debug("sendLogEvents(): <-notify, id=", id)
-					break L1
-				case <-ctx.Done():
-					ra.logger.Debug("sendLogEvents(): <-ctx.Done(), id=", id)
-					break L1
-				}
+			defer cancel()
+			select {
+			case <-notify:
+				ra.logger.Debug("sendLogEvents(): <-notify, id=", id)
+				break
+			case <-ctx.Done():
+				ra.logger.Debug("sendLogEvents(): <-ctx.Done(), id=", id)
+				break
 			}
-			cancel()
 		}()
 	}
 

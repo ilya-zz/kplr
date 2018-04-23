@@ -159,10 +159,14 @@ func TestParseFrom(t *testing.T) {
 	testParseFrom(t, "select limit 10", []string{})
 	testParseFrom(t, "select from * limit 10", []string{"*"})
 	testParseFrom(t, "select from '*' limit 10", []string{"*"})
+	testParseFrom(t, "select from system.log", []string{"system.log"})
 }
 
 func testParseFrom(t *testing.T, str string, exp []string) {
-	s, _ := Parse(str)
+	s, err := Parse(str)
+	if err != nil {
+		t.Fatal("could not parse ", str, " the err=", err)
+	}
 	res := buildFromList(s.From)
 	if !reflect.DeepEqual(exp, res) {
 		t.Fatal("Expecting ", exp, ", but actual are ", res, " for str=", str)

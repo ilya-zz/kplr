@@ -13,7 +13,7 @@ import (
 var (
 	kqlLexer = lexer.Unquote(lexer.Upper(lexer.Must(lexer.Regexp(`(\s+)`+
 		`|(?P<Keyword>(?i)SELECT|FORMAT|FROM|WHERE|POSITION|LIMIT|OFFSET|AND|OR|LIKE|CONTAINS|PREFIX|SUFFIX|NOT)`+
-		`|(?P<Ident>[a-zA-Z0-9-_@#$%?&*{}]+)`+
+		`|(?P<Ident>[a-zA-Z0-9-_@#$%?&*{}\.]+)`+
 		`|(?P<String>'(\\.|[^'])*'|"(\\.|[^"])*")`+
 		`|(?P<Operator><>|!=|<=|>=|[-+*/%,.=<>()])`,
 	)), "Keyword"), "String")
