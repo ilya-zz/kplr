@@ -146,9 +146,7 @@ func (it *Iterator) Close() error {
 }
 
 func (it *Iterator) dropBufToPos() {
-	if it.err == io.EOF {
-		it.err = nil
-	}
+	it.err = nil
 	it.valid = false
 	it.bbr.Reset(nil)
 	it.JReader.SetCurrentRecordId(it.pos)
@@ -178,6 +176,10 @@ func (it *Iterator) next() {
 // fillBuf reads next portion of records. So as the le contains WeakString it's context
 // is not trusted as soon, as the method is called
 func (it *Iterator) fillBuf() bool {
+	if it.err == io.EOF {
+		it.err = nil
+	}
+
 	if !it.bbr.End() || it.err != nil {
 		return it.err == nil
 	}
