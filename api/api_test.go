@@ -13,7 +13,7 @@ func TestApplyQueryParamsToKql(t *testing.T) {
 	testApplyQueryParamsToKql(t, url.Values{"where": []string{"a=b and c=d"}}, "SELECT WHERE a=b and c=d")
 	testApplyQueryParamsToKql(t, url.Values{"where": []string{"a=b and c=d"}, "jj": []string{"hh"}}, "SELECT WHERE a=b and c=d AND jj=hh")
 	testApplyQueryParamsToKql(t, url.Values{"format": []string{"a=b and c=d"}}, "SELECT \"a=b and c=d\"")
-	testApplyQueryParamsToKql(t, url.Values{"from": []string{"a", "b,c"}}, "SELECT FROM a,b,c")
+	testApplyQueryParamsToKql(t, url.Values{"from": []string{"a", "b"}}, "SELECT FROM \"a\",\"b\"")
 }
 
 func testApplyQueryParamsToKql(t *testing.T, q url.Values, expKql string) {
