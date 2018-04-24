@@ -1,6 +1,7 @@
 package kql
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -96,6 +97,10 @@ func Compile(kQuery string, idxer index.TagsIndexer) (*Query, error) {
 	return qry, err
 }
 
+func (q *Query) String() string {
+	return fmt.Sprintf("{jrnls: %v, select: %v}", q.jrnls, q.QSel)
+}
+
 func (q *Query) Limit() int64 {
 	return int64(q.QSel.Limit)
 }
@@ -128,6 +133,7 @@ func (q *Query) GetFilterF() model.FilterF {
 // Filter returns true if the log event le must be filtered
 func (q *Query) Filter(le *model.LogEvent) bool {
 	gid := le.GetTGroupId()
+
 	tgd, ok := q.tgCache[gid]
 	if !ok {
 		td := q.idxer.GetTagsDesc(gid)

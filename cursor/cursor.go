@@ -306,6 +306,9 @@ func (c *cur) Offset(count int64) {
 }
 
 func (c *cur) GetReader(limit int64, exact bool) io.ReadCloser {
+	if limit <= 0 {
+		c.logger.Warn("GetReader(): Are you sure you want to have 0 records? limit==0")
+	}
 	return newCurReader(c, limit, exact)
 }
 

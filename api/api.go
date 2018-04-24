@@ -231,14 +231,21 @@ func (ra *RestApi) h_GET_logs(c *gin.Context) {
 	}
 
 	blocked := parseBoolean(q, "blocked", true)
-	ra.logger.Debug("GET /logs kql=", kqlTxt, ", blocked=", blocked)
 
 	cur, qry, err := ra.newCursorByQuery(kqlTxt)
 	if ra.errorResponse(c, wrapErrorInvalidParam(err)) {
+		ra.logger.Warn("GET /logs kql=", kqlTxt, ", blocked=", blocked, " err=", err)
 		return
 	}
+	ra.logger.Debug("GET /logs kql=", kqlTxt, ", blocked=", blocked, " qry=", qry)
 
-	rdr := cur.GetReader(qry.Limit(), blocked)
+	limit := qry.Limit()
+	if limit < 1 {
+		ra.logger.Debug("Got limit == 0 in the query, change it to 1000")
+		limit = 1000
+	}
+
+	rdr := cur.GetReader(limit, blocked)
 	ra.sendData(c, rdr, blocked)
 	cur.Close()
 }
@@ -298,7 +305,6 @@ func (ra *RestApi) h_GET_cursors_curId_logs(c *gin.Context) {
 	}
 
 	defer ra.putCursorDesc(curId, cd)
-	defer ra.logger.Info("Hello!")
 
 	q := c.Request.URL.Query()
 

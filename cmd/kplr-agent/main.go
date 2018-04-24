@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/ghodss/yaml"
 	"github.com/jrivets/log4g"
 	"github.com/kplr-io/geyser"
 	"github.com/kplr-io/kplr/ingestor"
@@ -17,6 +20,7 @@ type (
 		config      string
 		debug       bool
 		printStatus bool
+		printConfig string
 	}
 )
 
@@ -38,9 +42,36 @@ func main() {
 
 	cfg := &ingestor.AgentConfig{}
 	err := cfg.LoadFromFile(args.config)
+	logger.Info("Loading config from ", args.config)
 	if err != nil {
-		logger.Warn("Unable to load config file=", args.config, "; cause: ", err, " will use default one")
+		if !os.IsNotExist(err) {
+			logger.Error("Unable to load config file=", args.config, "; cause err=", err)
+			os.Exit(1)
+		}
+
+		logger.Warn("Unable to load config file=", args.config, "; The file is not found")
 		cfg = ingestor.NewDefaultAgentConfig()
+	}
+
+	if args.printConfig != "" {
+		var bCfg []byte
+		switch args.printConfig {
+		case "json":
+			bCfg, err = json.MarshalIndent(cfg, "", "    ")
+		case "yaml":
+			bCfg, err = yaml.Marshal(cfg)
+		default:
+			logger.Error("Unsupported config format ", args.printConfig, " 'json' or 'yaml' can be used.")
+			os.Exit(1)
+		}
+
+		if err != nil {
+			logger.Error("Internal error, could not form config in YAML format: ", err)
+			os.Exit(1)
+		}
+		fmt.Println("")
+		fmt.Println(string(bCfg))
+		os.Exit(0)
 	}
 
 	if args.printStatus {
@@ -87,9 +118,10 @@ func main() {
 
 func parseCLP() *args {
 	var (
-		config = kingpin.Flag("config-file", "The kplr-agent configuration file name").Default(cDefaultConfigPath).String()
-		debug  = kingpin.Flag("debug", "Enable debug log level").Bool()
-		status = kingpin.Flag("print-status", "Prints status of the agent, if it is already run").Bool()
+		config      = kingpin.Flag("config-file", "The kplr-agent configuration file name").Default(cDefaultConfigPath).String()
+		debug       = kingpin.Flag("debug", "Enable debug log level").Bool()
+		printConfig = kingpin.Flag("print-config", "Prints existing config in YAML format.").PlaceHolder("(json|yaml)").String()
+		status      = kingpin.Flag("print-status", "Prints status of the agent, if it is already run").Bool()
 	)
 	kingpin.Version(Version)
 	kingpin.Parse()
@@ -98,6 +130,7 @@ func parseCLP() *args {
 	res.config = *config
 	res.debug = *debug
 	res.printStatus = *status
+	res.printConfig = *printConfig
 	return res
 }
 

@@ -3,8 +3,10 @@ package ingestor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
 	"text/tabwriter"
 	"time"
@@ -76,7 +78,10 @@ func (sfu *StatusFileUpdater) saveStatFile() {
 	fmt.Fprintf(tw, "*************\n")
 	fmt.Fprintf(tw, "* Kplr Agent \n")
 	fmt.Fprintf(tw, "*************\n")
-	fmt.Fprintf(tw, "Status at %s\n\n", time.Now().String())
+	fmt.Fprintf(tw, "\n=== Configuration file ===\n")
+	buf, _ := json.MarshalIndent(sfu.cfg, "", "   ")
+	fmt.Fprintf(tw, string(buf))
+	fmt.Fprintf(tw, "\n\nStatus at %s\n\n", time.Now().String())
 	fmt.Fprintf(tw, "=== Connection ===\n")
 	fmt.Fprintf(tw, "\tAggregator:\t%s\n", sfu.cfg.Ingestor.Server)
 	fmt.Fprintf(tw, "\tRecs per packet:\t%d\n", sfu.cfg.Ingestor.PacketMaxRecords)
@@ -112,7 +117,8 @@ func (sfu *StatusFileUpdater) saveStatFile() {
 	totalPerc := float64(0)
 	for i, wkr := range gs.Workers {
 		fmt.Fprintf(tw, "\n--- Scanner %d\n", i+1)
-		fmt.Fprintf(tw, "\t%s\n", wkr.Filename)
+		fmt.Fprintf(tw, "\tfile:\t%s\n", wkr.Filename)
+		fmt.Fprintf(tw, "\tdesc-id:\t%s\n", wkr.Id)
 		fmt.Fprintf(tw, "\tdata-type:\t%s\n", wkr.ParserStats.DataType)
 		size := wkr.ParserStats.Size
 		fmt.Fprintf(tw, "\tsize:\t%s\n", kplr.FormatSize(size))
@@ -122,6 +128,7 @@ func (sfu *StatusFileUpdater) saveStatFile() {
 		if size > 0 {
 			perc = float64(pos) * perc / float64(size)
 		}
+		perc = math.Max(0.0, math.Min(100.0, perc))
 		totalPerc += perc
 
 		if tags, ok := knwnTags[wkr.Filename]; ok {
