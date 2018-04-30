@@ -3,7 +3,9 @@ package ingestor
 import (
 	"encoding/json"
 	"io/ioutil"
+	"strings"
 
+	"github.com/ghodss/yaml"
 	"github.com/kplr-io/geyser"
 	"github.com/mohae/deepcopy"
 )
@@ -121,6 +123,10 @@ func (ac *AgentConfig) LoadFromFile(path string) error {
 		return err
 	}
 
+	toLower := strings.ToLower(path)
+	if strings.HasSuffix(toLower, "yaml") {
+		return yaml.Unmarshal(data, ac)
+	}
 	return json.Unmarshal(data, ac)
 }
 
