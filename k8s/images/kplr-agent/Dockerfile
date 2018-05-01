@@ -7,8 +7,8 @@ RUN apt-get -q -y update && \
     less \
     dnsutils
 
-RUN mkdir -p /opt/kplr
+RUN mkdir -p /opt/kplr/agent
 
-COPY ["build/kplr-agent", "config.json", "/opt/kplr/"]
+COPY ["build/kplr-agent", "config.json", "/opt/kplr/agent/"]
 
-ENTRYPOINT ["/opt/kplr/kplr-agent", "--config-file", "/opt/kplr/config.json"]
+ENTRYPOINT ["/opt/kplr/agent/kplr-agent", "--config-file", "/opt/kplr/agent/config.json"]

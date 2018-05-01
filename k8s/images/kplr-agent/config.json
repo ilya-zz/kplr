@@ -1,6 +1,7 @@
 {
   "ingestor": {
-    "server": "log-aggregator.kube-system.svc.cluster.local:9966",
+    "server": "kplr.kube-system.svc.cluster.local:9966",
+    "retrySec": 5,
     "heartBeatMs": 15000,
     "packetMaxRecords": 1000,
     "accessKey": "",
@@ -19,7 +20,6 @@
   "collector": {
     "scanPaths": ["/var/log/containers/*.log", "/var/log/containers/*/*.log"],
     "scanPathsIntervalSec": 60,
-    "stateFile": "/opt/kplr/collector.state",
     "stateFlushIntervalSec": 10,
     "eventMaxRecords": 1000,
     "eventSendIntervalMs": 200,
@@ -28,5 +28,7 @@
       "pathMatcher": ".*",
       "format": "json"
     }]
-  }
+  },
+  "statusFile": "/opt/kplr/agent/status",
+  "stateFile": "/opt/kplr/agent/collector.state"
 }

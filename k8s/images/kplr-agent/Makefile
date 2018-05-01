@@ -1,6 +1,6 @@
 BUILD_DIR:=./build
 SOURCE_DIR:=../../../cmd/kplr-agent/
-IMAGE_TAG:=kplr/log-agent
+IMAGE_TAG:=kplr/kplr-agent
 BUILD_PREFIX=GOOS=linux GOARCH=amd64
 
 .PHONE: all

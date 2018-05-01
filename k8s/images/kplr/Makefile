@@ -1,6 +1,6 @@
 BUILD_DIR=./build
 SOURCE_DIR=../../../cmd/kplr/
-IMAGE_TAG=kplr/log-aggregator
+IMAGE_TAG=kplr/kplr
 BUILD_PREFIX=GOOS=linux GOARCH=amd64
 
 .PHONE: all
