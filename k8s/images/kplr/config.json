@@ -1,0 +1,17 @@
+{
+  "JournalsDir": "/opt/kplr/journals/",
+  "ZebraListenOn": "0.0.0.0:9966",
+  "SessionTimeoutSec": 30,
+  "ZebraKeyFN": "",
+  "ZebraCertFN": "",
+  "ZebraCaFN": "",
+  "Zebra2WayTls": false,
+  "HttpListenOn": ":8080",
+  "HttpShtdwnToSec": 5,
+  "HttpDebugMode": false,
+  "HttpsKeyFN": "",
+  "HttpsCertFN": "",
+  "JrnlChunkMaxSize": 50000000,
+  "JrnlMaxSize": 1000000000000,
+  "JrnlRecoveryOn": false
+}

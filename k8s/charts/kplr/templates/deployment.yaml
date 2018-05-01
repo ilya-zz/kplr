@@ -38,17 +38,22 @@ spec:
               protocol: TCP
               containerPort: 8080
           volumeMounts:
-            - name: varlog
-              mountPath: /var/log
-            - name: dockercontainers
-              mountPath: /var/lib/docker/containers
+            - name: config
+              mountPath: /opt/kplr/config.json
+              subPath: config.json
+{{- range $key, $val := .Values.volumes }}
+            - name: {{ $key }}
+              mountPath: {{ $val }}
+{{- end}}
       volumes:
-        - name: varlog
+        - name: config
+          configMap:
+            name: {{ template "kplr.name" . }}
+{{- range $key, $val := .Values.volumes }}
+        - name: {{ $key }}
           hostPath:
-            path: /var/log
-        - name: dockercontainers
-          hostPath:
-            path: /var/lib/docker/containers
+            path: {{ $val }}
+{{- end}}
       resources:
 {{ toYaml .Values.resources | indent 8 }}
 {{- with .Values.nodeSelector }}

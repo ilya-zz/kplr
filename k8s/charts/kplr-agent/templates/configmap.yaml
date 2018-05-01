@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "kplr-agent.name" . }}
+  namespace: kube-system
+  labels:
+    heritage: {{ .Release.Service }}
+    release: {{ .Release.Name }}
+    chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    app: {{ template "kplr-agent.name" . }}
+data:
+  config.json: |
+    {
+      "ingestor": {
+        "server": "kplr.kube-system.svc.cluster.local:9966",
+        "retrySec": 10,
+        "heartBeatMs": 15000,
+        "packetMaxRecords": 1000,
+        "accessKey": "",
+        "secretKey": "",
+        "schemas": [{
+          "pathMatcher":"/*(?:.+/)*(?P<pod>.+)_(?P<ns>.+)_(?P<cname>.+)-(?P<cid>.+)\\..+",
+          "sourceId":"{cname}",
+          "tags": {
+            "pod": "{pod}",
+            "ns": "{ns}",
+            "cname": "{cname}",
+            "cid": "{cid}"
+          }
+        }]
+      },
+      "collector": {
+        "scanPaths": ["/var/log/containers/*.log", "/var/log/containers/*/*.log"],
+        "scanPathsIntervalSec": 60,
+        "stateFlushIntervalSec": 10,
+        "eventMaxRecords": 1000,
+        "eventSendIntervalMs": 200,
+        "recordMaxSizeBytes": 16384,
+        "fileFormats": [{
+          "pathMatcher": ".*",
+          "format": "json"
+        }]
+      },
+      "statusFile": "/opt/kplr/agent/status",
+      "stateFile": "/opt/kplr/agent/collector.state"
+    }
