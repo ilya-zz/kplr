@@ -94,7 +94,7 @@ func parseCLP() (*Config, error) {
 
 	if *logCfgFile != "" {
 		if kplr.IsFileNotExist(*logCfgFile) {
-			kplr.DefaultLogger.Warn("No file ", logCfgFile, " will use default log4g configuration")
+			kplr.DefaultLogger.Warn("No file ", *logCfgFile, " will use default log4g configuration")
 		} else {
 			err := log4g.ConfigF(*logCfgFile)
 			if err != nil {
